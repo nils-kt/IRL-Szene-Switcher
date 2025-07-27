@@ -1,0 +1,10 @@
+{
+  "srtApiUrl": "http://localhost:9997/v3/srtconns/list",
+  "obsHost": "localhost",
+  "obsPort": 4455,
+  "obsPassword": "",
+  "checkInterval": 1000,
+  "liveScene": "Live",
+  "fallbackScene": "Offline",
+  "logLevel": "info"
+} 

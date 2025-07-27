@@ -1,0 +1,22 @@
+{
+  "name": "obs-scene-switcher",
+  "version": "1.0.0",
+  "description": "Script zur automatischen Szenenumschaltung in OBS Studio basierend auf SRT-Verbindungsstatus",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "dependencies": {
+    "obs-websocket-js": "^5.0.3",
+    "axios": "^1.6.0"
+  },
+  "keywords": [
+    "obs",
+    "scene-switcher",
+    "srt",
+    "streaming"
+  ],
+  "author": "",
+  "license": "MIT"
+} 
