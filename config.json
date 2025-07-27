@@ -9,7 +9,7 @@
   "logLevel": "info",
   "bitrateMonitoring": {
     "enabled": true,
-    "threshold": 2000.0,
+    "threshold": 2.0,
     "sourceName": "Low Bitrate Warning",
     "connectionType": "publish"
   }

@@ -222,14 +222,41 @@ class SceneSwitcher {
             console.log(`${visible ? '👁️' : '🚫'} ${visible ? 'Zeige' : 'Verstecke'} Quelle "${sourceName}"`);
             
             try {
+                const sceneItemId = await this.getSceneItemId(sceneName, sourceName);
+                
                 await this.obs.call('SetSceneItemEnabled', {
                     sceneName: sceneName,
-                    sceneItemId: await this.getSceneItemId(sceneName, sourceName),
+                    sceneItemId: sceneItemId,
                     sceneItemEnabled: visible
                 });
                 
-                console.log(`✅ Quelle "${sourceName}" ${visible ? 'angezeigt' : 'ausgeblendet'} in Szene "${sceneName}"`);
-                return true;
+                // Status nach der Änderung überprüfen
+                const actualStatus = await this.verifySourceVisibility(sceneName, sceneItemId, sourceName);
+                
+                if (actualStatus === visible) {
+                    console.log(`✅ Quelle "${sourceName}" erfolgreich ${visible ? 'angezeigt' : 'ausgeblendet'} in Szene "${sceneName}"`);
+                    return true;
+                } else {
+                    console.log(`⚠️  Quelle "${sourceName}" Status-Mismatch in Szene "${sceneName}": Erwartet ${visible}, Tatsächlich ${actualStatus}`);
+                    // Zweiter Versuch
+                    console.log(`🔄 Zweiter Versuch für Quelle "${sourceName}" in Szene "${sceneName}"`);
+                    await this.obs.call('SetSceneItemEnabled', {
+                        sceneName: sceneName,
+                        sceneItemId: sceneItemId,
+                        sceneItemEnabled: visible
+                    });
+                    
+                    // Kurz warten und erneut prüfen
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    const retryStatus = await this.verifySourceVisibility(sceneName, sceneItemId, sourceName);
+                    if (retryStatus === visible) {
+                        console.log(`🔍 Nach zweitem Versuch: ✅ Erfolg (Status: ${retryStatus})`);
+                        return true;
+                    } else {
+                        console.log(`🔍 Nach zweitem Versuch: ❌ Fehlgeschlagen (Status: ${retryStatus})`);
+                        return false;
+                    }
+                }
                 
             } catch (sceneError) {
                 console.log(`⚠️  Quelle "${sourceName}" nicht in aktueller Szene "${sceneName}" gefunden - suche in allen Szenen...`);
@@ -260,8 +287,27 @@ class SceneSwitcher {
                         sceneItemEnabled: visible
                     });
                     
+                    // Status nach der Änderung überprüfen
+                    const actualStatus = await this.verifySourceVisibility(scene.sceneName, sceneItemId, sourceName);
+                    
                     foundInScenes.push(scene.sceneName);
-                    console.log(`✅ Quelle "${sourceName}" ${visible ? 'angezeigt' : 'ausgeblendet'} in Szene "${scene.sceneName}"`);
+                    if (actualStatus === visible) {
+                        console.log(`✅ Quelle "${sourceName}" erfolgreich ${visible ? 'angezeigt' : 'ausgeblendet'} in Szene "${scene.sceneName}"`);
+                    } else {
+                        console.log(`⚠️  Quelle "${sourceName}" Status-Mismatch in Szene "${scene.sceneName}": Erwartet ${visible}, Tatsächlich ${actualStatus}`);
+                        // Zweiter Versuch
+                        console.log(`🔄 Zweiter Versuch für Quelle "${sourceName}" in Szene "${scene.sceneName}"`);
+                        await this.obs.call('SetSceneItemEnabled', {
+                            sceneName: scene.sceneName,
+                            sceneItemId: sceneItemId,
+                            sceneItemEnabled: visible
+                        });
+                        
+                        // Kurz warten und erneut prüfen
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                        const retryStatus = await this.verifySourceVisibility(scene.sceneName, sceneItemId, sourceName);
+                        console.log(`🔍 Nach zweitem Versuch: ${retryStatus === visible ? '✅ Erfolg' : '❌ Fehlgeschlagen'} (Status: ${retryStatus})`);
+                    }
                     
                 } catch (sceneError) {
                     // Quelle nicht in dieser Szene - das ist normal
@@ -301,6 +347,9 @@ class SceneSwitcher {
                 throw new Error(`Quelle "${sourceName}" nicht in Szene "${sceneName}" gefunden`);
             }
 
+            // Debug-Informationen über die gefundene Quelle
+            console.log(`🔍 Debug: Gefundene Quelle "${sourceName}" - ID: ${item.sceneItemId}, Typ: ${item.sourceType || 'unknown'}, Gruppe: ${item.isGroup || false}`);
+
             return item.sceneItemId;
         } catch (error) {
             throw new Error(`Konnte Scene Item ID nicht ermitteln: ${error.message}`);
@@ -324,6 +373,30 @@ class SceneSwitcher {
         }
     }
 
+    async verifySourceVisibility(sceneName, sceneItemId, sourceName) {
+        try {
+            const sceneItems = await this.obs.call('GetSceneItemList', {
+                sceneName: sceneName
+            });
+
+            const item = sceneItems.sceneItems.find(item => 
+                item.sceneItemId === sceneItemId && item.sourceName === sourceName
+            );
+
+            if (!item) {
+                console.log(`🔍 Debug: Quelle "${sourceName}" mit ID ${sceneItemId} nicht in Szene "${sceneName}" gefunden`);
+                return null;
+            }
+
+            console.log(`🔍 Debug: Quelle "${sourceName}" Status in "${sceneName}": ${item.sceneItemEnabled ? 'sichtbar' : 'ausgeblendet'} (ID: ${sceneItemId})`);
+            return item.sceneItemEnabled;
+
+        } catch (error) {
+            console.error(`🔍 Debug: Fehler beim Überprüfen der Quelle "${sourceName}":`, error.message);
+            return null;
+        }
+    }
+
     async listSourcesInAllScenes() {
         try {
             const scenes = await this.obs.call('GetSceneList');
@@ -339,7 +412,7 @@ class SceneSwitcher {
                         console.log(`     Keine Quellen`);
                     } else {
                         sceneItems.sceneItems.forEach((item, index) => {
-                            console.log(`     ${index + 1}. ${item.sourceName} (${item.sceneItemEnabled ? 'sichtbar' : 'ausgeblendet'})`);
+                            console.log(`     ${index + 1}. ${item.sourceName} (ID: ${item.sceneItemId}, ${item.sceneItemEnabled ? 'sichtbar' : 'ausgeblendet'})`);
                         });
                     }
                 } catch (sceneError) {
@@ -380,12 +453,18 @@ class SceneSwitcher {
                     console.log(`📉 Niedrige Bitrate erkannt (${currentBitrate.toFixed(2)} < ${this.config.bitrateMonitoring.threshold} Mbps) - zeige Warning`);
                     await this.setSourceVisibility(this.config.bitrateMonitoring.sourceName, true);
                 } else {
-                    console.log(`📈 Bitrate OK (${currentBitrate.toFixed(2)} >= ${this.config.bitrateMonitoring.threshold} Mbps) - verstecke Warning`);
+                    console.log(`📈 Bitrate wiederhergestellt (${currentBitrate.toFixed(2)} >= ${this.config.bitrateMonitoring.threshold} Mbps) - verstecke Warning`);
                     await this.setSourceVisibility(this.config.bitrateMonitoring.sourceName, false);
                 }
                 this.lastBitrateState = isLowBitrate;
-            } else if (this.config.logLevel === 'debug') {
-                console.log(`🔍 Bitrate unverändert: ${currentBitrate.toFixed(2)} Mbps (${isLowBitrate ? 'niedrig' : 'OK'})`);
+            } else {
+                // Zeige aktuellen Status auch wenn unverändert (aber weniger aufdringlich)
+                if (this.config.logLevel === 'debug') {
+                    console.log(`🔍 Bitrate-Status unverändert: ${currentBitrate.toFixed(2)} Mbps (${isLowBitrate ? '📉 Warning aktiv' : '📈 OK'})`);
+                } else {
+                    // Auch im normalen Modus minimal loggen
+                    console.log(`📊 Bitrate: ${currentBitrate.toFixed(2)} Mbps (${isLowBitrate ? '⚠️ Warning' : '✅ OK'})`);
+                }
             }
         }
 
