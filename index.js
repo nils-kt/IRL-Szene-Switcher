@@ -11,6 +11,7 @@ class SceneSwitcher {
         this.obs = new OBSWebSocket();
         this.isConnectedToOBS = false;
         this.lastPublishState = null; // Zur Vermeidung unnötiger Szenenwechsel
+        this.lastBitrateState = null; // Zur Vermeidung unnötiger Bitrate-Warnungen
         this.intervalId = null;
     }
 
@@ -24,7 +25,13 @@ class SceneSwitcher {
             checkInterval: 5000,
             liveScene: 'Live',
             fallbackScene: 'Szene ohne Stream',
-            logLevel: 'info'
+            logLevel: 'info',
+            bitrateMonitoring: {
+                enabled: false,
+                threshold: 1.0,
+                sourceName: 'Low Bitrate Warning',
+                connectionType: 'publish'
+            }
         };
 
         try {
@@ -120,14 +127,28 @@ class SceneSwitcher {
                     state: publishConnection.state,
                     created: publishConnection.created || 'unknown'
                 });
-                return true;
+                
+                // Bitrate-Informationen zurückgeben wenn Monitoring aktiviert
+                if (this.config.bitrateMonitoring.enabled) {
+                    const targetConnection = this.config.bitrateMonitoring.connectionType === 'publish' 
+                        ? publishConnection 
+                        : connections.find(conn => conn.state === this.config.bitrateMonitoring.connectionType);
+                    
+                    if (targetConnection) {
+                        const bitrate = targetConnection.mbpsSendRate || 0;
+                        console.log(`📊 Bitrate (${this.config.bitrateMonitoring.connectionType}): ${bitrate.toFixed(2)} Mbps`);
+                        return { hasPublish: true, bitrate: bitrate };
+                    }
+                }
+                
+                return { hasPublish: true, bitrate: null };
             } else {
                 console.log('❌ Keine aktive Publish-Verbindung gefunden');
                 console.log('   Verfügbare Verbindungen:');
                 connections.forEach((conn, index) => {
-                    console.log(`   ${index + 1}. ID: ${conn.id || 'unknown'}, State: ${conn.state || 'unknown'}`);
+                    console.log(`   ${index + 1}. ID: ${conn.id || 'unknown'}, State: ${conn.state || 'unknown'}, Bitrate: ${(conn.mbpsSendRate || 0).toFixed(2)} Mbps`);
                 });
-                return false;
+                return { hasPublish: false, bitrate: null };
             }
 
         } catch (error) {
@@ -138,7 +159,7 @@ class SceneSwitcher {
             } else {
                 console.error('❌ Fehler beim Abrufen der SRT-Verbindungen:', error.message);
             }
-            return false;
+            return { hasPublish: false, bitrate: null };
         }
     }
 
@@ -187,10 +208,82 @@ class SceneSwitcher {
         return await this.switchToScene(this.config.fallbackScene, 'Fallback');
     }
 
+    async setSourceVisibility(sourceName, visible) {
+        if (!this.isConnectedToOBS) {
+            console.log('⚠️  Kann Quelle nicht steuern - nicht mit OBS verbunden');
+            return false;
+        }
+
+        try {
+            // Versuche zuerst die aktuelle Szene zu ermitteln
+            const currentScene = await this.obs.call('GetCurrentProgramScene');
+            const sceneName = currentScene.currentProgramSceneName;
+
+            console.log(`${visible ? '👁️' : '🚫'} ${visible ? 'Zeige' : 'Verstecke'} Quelle "${sourceName}" in Szene "${sceneName}"`);
+            
+            await this.obs.call('SetSceneItemEnabled', {
+                sceneName: sceneName,
+                sceneItemId: await this.getSceneItemId(sceneName, sourceName),
+                sceneItemEnabled: visible
+            });
+            
+            console.log(`✅ Quelle "${sourceName}" ${visible ? 'angezeigt' : 'ausgeblendet'}`);
+            return true;
+            
+        } catch (error) {
+            console.error(`❌ Fehler beim ${visible ? 'Anzeigen' : 'Ausblenden'} der Quelle "${sourceName}":`, error.message);
+            
+            if (error.message.includes('No source')) {
+                console.error(`   Quelle "${sourceName}" existiert nicht in der aktuellen Szene`);
+                await this.listAvailableSources();
+            }
+            return false;
+        }
+    }
+
+    async getSceneItemId(sceneName, sourceName) {
+        try {
+            const sceneItems = await this.obs.call('GetSceneItemList', {
+                sceneName: sceneName
+            });
+
+            const item = sceneItems.sceneItems.find(item => 
+                item.sourceName === sourceName
+            );
+
+            if (!item) {
+                throw new Error(`Quelle "${sourceName}" nicht in Szene "${sceneName}" gefunden`);
+            }
+
+            return item.sceneItemId;
+        } catch (error) {
+            throw new Error(`Konnte Scene Item ID nicht ermitteln: ${error.message}`);
+        }
+    }
+
+    async listAvailableSources() {
+        try {
+            const currentScene = await this.obs.call('GetCurrentProgramScene');
+            const sceneName = currentScene.currentProgramSceneName;
+            const sceneItems = await this.obs.call('GetSceneItemList', {
+                sceneName: sceneName
+            });
+
+            console.log(`   Verfügbare Quellen in Szene "${sceneName}":`);
+            sceneItems.sceneItems.forEach((item, index) => {
+                console.log(`   ${index + 1}. ${item.sourceName} (${item.sceneItemEnabled ? 'sichtbar' : 'ausgeblendet'})`);
+            });
+        } catch (error) {
+            console.error('   Konnte Quellen nicht abrufen:', error.message);
+        }
+    }
+
     async performCheck() {
-        const hasPublishConnection = await this.checkSRTConnections();
+        const result = await this.checkSRTConnections();
+        const hasPublishConnection = result.hasPublish;
+        const currentBitrate = result.bitrate;
         
-        // Nur Aktion ausführen wenn sich der Status geändert hat
+        // Szenen-Management: Nur Aktion ausführen wenn sich der Status geändert hat
         if (this.lastPublishState !== hasPublishConnection) {
             if (hasPublishConnection) {
                 console.log('🔴 Live: Publish-Verbindung aktiv - wechsle zu Live-Szene');
@@ -202,6 +295,32 @@ class SceneSwitcher {
             this.lastPublishState = hasPublishConnection;
         } else {
             console.log(`ℹ️  Status unverändert (${hasPublishConnection ? '🔴 Live' : '⚫ Offline'})`);
+        }
+
+        // Bitrate-Monitoring: Nur wenn aktiviert und Live-Verbindung vorhanden
+        if (this.config.bitrateMonitoring.enabled && hasPublishConnection && currentBitrate !== null) {
+            const isLowBitrate = currentBitrate < this.config.bitrateMonitoring.threshold;
+            
+            // Nur Aktion ausführen wenn sich der Bitrate-Status geändert hat
+            if (this.lastBitrateState !== isLowBitrate) {
+                if (isLowBitrate) {
+                    console.log(`📉 Niedrige Bitrate erkannt (${currentBitrate.toFixed(2)} < ${this.config.bitrateMonitoring.threshold} Mbps) - zeige Warning`);
+                    await this.setSourceVisibility(this.config.bitrateMonitoring.sourceName, true);
+                } else {
+                    console.log(`📈 Bitrate OK (${currentBitrate.toFixed(2)} >= ${this.config.bitrateMonitoring.threshold} Mbps) - verstecke Warning`);
+                    await this.setSourceVisibility(this.config.bitrateMonitoring.sourceName, false);
+                }
+                this.lastBitrateState = isLowBitrate;
+            } else if (this.config.logLevel === 'debug') {
+                console.log(`🔍 Bitrate unverändert: ${currentBitrate.toFixed(2)} Mbps (${isLowBitrate ? 'niedrig' : 'OK'})`);
+            }
+        }
+
+        // Warning verstecken wenn keine Live-Verbindung
+        if (this.config.bitrateMonitoring.enabled && !hasPublishConnection && this.lastBitrateState !== null) {
+            console.log('⚫ Offline - verstecke Bitrate-Warning');
+            await this.setSourceVisibility(this.config.bitrateMonitoring.sourceName, false);
+            this.lastBitrateState = null;
         }
         
         console.log('─'.repeat(50));
@@ -215,6 +334,16 @@ class SceneSwitcher {
         console.log(`   🔴 Live-Szene: "${this.config.liveScene}"`);
         console.log(`   ⚫ Fallback-Szene: "${this.config.fallbackScene}"`);
         console.log(`   Überprüfungsintervall: ${this.config.checkInterval}ms`);
+        
+        if (this.config.bitrateMonitoring.enabled) {
+            console.log('📊 Bitrate-Monitoring:');
+            console.log(`   📉 Threshold: ${this.config.bitrateMonitoring.threshold} Mbps`);
+            console.log(`   🎯 Quelle: "${this.config.bitrateMonitoring.sourceName}"`);
+            console.log(`   🔗 Verbindungstyp: ${this.config.bitrateMonitoring.connectionType}`);
+        } else {
+            console.log('📊 Bitrate-Monitoring: Deaktiviert');
+        }
+        
         console.log('─'.repeat(50));
 
         // Verbindung zu OBS herstellen

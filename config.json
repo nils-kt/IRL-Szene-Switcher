@@ -3,8 +3,14 @@
   "obsHost": "localhost",
   "obsPort": 4455,
   "obsPassword": "",
-  "checkInterval": 1000,
+  "checkInterval": 3000,
   "liveScene": "Live",
   "fallbackScene": "Offline",
-  "logLevel": "info"
+  "logLevel": "info",
+  "bitrateMonitoring": {
+    "enabled": true,
+    "threshold": 1.0,
+    "sourceName": "Low Bitrate Warning",
+    "connectionType": "publish"
+  }
 } 
