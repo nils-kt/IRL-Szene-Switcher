@@ -10,9 +10,9 @@ Das Script:
 - Wechselt automatisch zwischen zwei Szenen in OBS Studio:
   - **Live-Szene**: Wenn eine aktive Publish-Verbindung gefunden wird
   - **Fallback-Szene**: Wenn keine aktive Publish-Verbindung vorhanden ist
-- **Bitrate-Monitoring** (optional): Überwacht die Bitrate und blendet eine konfigurierbare Quelle ein/aus:
-  - **Quelle anzeigen**: Bei Bitrate unter dem konfigurierten Schwellenwert (z.B. "Low Bitrate" Text)
-  - **Quelle ausblenden**: Bei Bitrate über dem Schwellenwert
+- **Bitrate-Monitoring** (optional): Überwacht die empfangene Bitrate (`mbpsReceiveRate`) und blendet eine konfigurierbare Quelle ein/aus:
+  - **Quelle anzeigen**: Bei empfangener Bitrate unter dem konfigurierten Schwellenwert (z.B. "Low Bitrate" Text)
+  - **Quelle ausblenden**: Bei empfangener Bitrate über dem Schwellenwert
 
 ## Voraussetzungen
 
@@ -79,7 +79,7 @@ Die `config.json` wird automatisch mit Standardwerten erstellt, wenn sie nicht e
 
 **Bitrate-Monitoring Einstellungen:**
 - `enabled`: Aktiviert/Deaktiviert das Bitrate-Monitoring
-- `threshold`: Bitrate-Schwellenwert in Mbps (z.B. 1.0 = unter 1 Mbps zeigt Warning)
+- `threshold`: Empfangene Bitrate-Schwellenwert in Mbps (z.B. 1.0 = unter 1 Mbps zeigt Warning)
 - `sourceName`: Name der OBS-Quelle die ein-/ausgeblendet werden soll (z.B. "Low Bitrate Warning")
 - `connectionType`: Welche Verbindung überwacht werden soll ("publish" oder "read")
 
@@ -159,12 +159,12 @@ Für ältere OBS Versionen:
 
 ### Bitrate-Monitoring aktiviert:
 ```
-📊 Bitrate (publish): 0.85 Mbps
+📊 Bitrate (publish): 0.85 Mbps (Receive)
 📉 Niedrige Bitrate erkannt (0.85 < 1.00 Mbps) - zeige Warning
 👁️ Zeige Quelle "Low Bitrate Warning" in Szene "Live"
 ✅ Quelle "Low Bitrate Warning" angezeigt
 
-📊 Bitrate (publish): 1.25 Mbps  
+📊 Bitrate (publish): 1.25 Mbps (Receive)  
 📈 Bitrate OK (1.25 >= 1.00 Mbps) - verstecke Warning
 🚫 Verstecke Quelle "Low Bitrate Warning" in Szene "Live"
 ✅ Quelle "Low Bitrate Warning" ausgeblendet
@@ -182,13 +182,15 @@ Die SRT-API sollte folgendes Format zurückgeben:
       "id": "connection_1",
       "state": "publish",
       "created": "2024-01-01T12:00:00Z",
+      "mbpsReceiveRate": 5.92,
       "mbpsSendRate": 1.25
     },
     {
       "id": "connection_2", 
       "state": "read",
       "created": "2024-01-01T11:30:00Z",
-      "mbpsSendRate": 0.85
+      "mbpsReceiveRate": 0.85,
+      "mbpsSendRate": 2.10
     }
   ]
 }

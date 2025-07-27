@@ -135,8 +135,8 @@ class SceneSwitcher {
                         : connections.find(conn => conn.state === this.config.bitrateMonitoring.connectionType);
                     
                     if (targetConnection) {
-                        const bitrate = targetConnection.mbpsSendRate || 0;
-                        console.log(`📊 Bitrate (${this.config.bitrateMonitoring.connectionType}): ${bitrate.toFixed(2)} Mbps`);
+                        const bitrate = targetConnection.mbpsReceiveRate || 0;
+                        console.log(`📊 Bitrate (${this.config.bitrateMonitoring.connectionType}): ${bitrate.toFixed(2)} Mbps (Receive)`);
                         return { hasPublish: true, bitrate: bitrate };
                     }
                 }
@@ -146,7 +146,7 @@ class SceneSwitcher {
                 console.log('❌ Keine aktive Publish-Verbindung gefunden');
                 console.log('   Verfügbare Verbindungen:');
                 connections.forEach((conn, index) => {
-                    console.log(`   ${index + 1}. ID: ${conn.id || 'unknown'}, State: ${conn.state || 'unknown'}, Bitrate: ${(conn.mbpsSendRate || 0).toFixed(2)} Mbps`);
+                    console.log(`   ${index + 1}. ID: ${conn.id || 'unknown'}, State: ${conn.state || 'unknown'}, Receive: ${(conn.mbpsReceiveRate || 0).toFixed(2)} Mbps, Send: ${(conn.mbpsSendRate || 0).toFixed(2)} Mbps`);
                 });
                 return { hasPublish: false, bitrate: null };
             }
@@ -348,6 +348,13 @@ class SceneSwitcher {
 
         // Verbindung zu OBS herstellen
         await this.connectToOBS();
+
+        // Initial Bitrate-Warning ausblenden (falls aktiviert)
+        if (this.config.bitrateMonitoring.enabled && this.isConnectedToOBS) {
+            console.log('🚫 Initial: Verstecke Bitrate-Warning-Quelle');
+            await this.setSourceVisibility(this.config.bitrateMonitoring.sourceName, false);
+            this.lastBitrateState = false; // Initial als "keine Warning" setzen
+        }
 
         // Erste Überprüfung
         await this.performCheck();
