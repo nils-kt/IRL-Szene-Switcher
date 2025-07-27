@@ -219,24 +219,70 @@ class SceneSwitcher {
             const currentScene = await this.obs.call('GetCurrentProgramScene');
             const sceneName = currentScene.currentProgramSceneName;
 
-            console.log(`${visible ? '👁️' : '🚫'} ${visible ? 'Zeige' : 'Verstecke'} Quelle "${sourceName}" in Szene "${sceneName}"`);
+            console.log(`${visible ? '👁️' : '🚫'} ${visible ? 'Zeige' : 'Verstecke'} Quelle "${sourceName}"`);
             
-            await this.obs.call('SetSceneItemEnabled', {
-                sceneName: sceneName,
-                sceneItemId: await this.getSceneItemId(sceneName, sourceName),
-                sceneItemEnabled: visible
-            });
-            
-            console.log(`✅ Quelle "${sourceName}" ${visible ? 'angezeigt' : 'ausgeblendet'}`);
-            return true;
+            try {
+                await this.obs.call('SetSceneItemEnabled', {
+                    sceneName: sceneName,
+                    sceneItemId: await this.getSceneItemId(sceneName, sourceName),
+                    sceneItemEnabled: visible
+                });
+                
+                console.log(`✅ Quelle "${sourceName}" ${visible ? 'angezeigt' : 'ausgeblendet'} in Szene "${sceneName}"`);
+                return true;
+                
+            } catch (sceneError) {
+                console.log(`⚠️  Quelle "${sourceName}" nicht in aktueller Szene "${sceneName}" gefunden - suche in allen Szenen...`);
+                
+                // Suche in allen Szenen
+                return await this.setSourceVisibilityInAllScenes(sourceName, visible);
+            }
             
         } catch (error) {
             console.error(`❌ Fehler beim ${visible ? 'Anzeigen' : 'Ausblenden'} der Quelle "${sourceName}":`, error.message);
-            
-            if (error.message.includes('No source')) {
-                console.error(`   Quelle "${sourceName}" existiert nicht in der aktuellen Szene`);
-                await this.listAvailableSources();
+            return false;
+        }
+    }
+
+    async setSourceVisibilityInAllScenes(sourceName, visible) {
+        try {
+            const scenes = await this.obs.call('GetSceneList');
+            let foundInScenes = [];
+            let errors = [];
+
+            for (const scene of scenes.scenes) {
+                try {
+                    const sceneItemId = await this.getSceneItemId(scene.sceneName, sourceName);
+                    
+                    await this.obs.call('SetSceneItemEnabled', {
+                        sceneName: scene.sceneName,
+                        sceneItemId: sceneItemId,
+                        sceneItemEnabled: visible
+                    });
+                    
+                    foundInScenes.push(scene.sceneName);
+                    console.log(`✅ Quelle "${sourceName}" ${visible ? 'angezeigt' : 'ausgeblendet'} in Szene "${scene.sceneName}"`);
+                    
+                } catch (sceneError) {
+                    // Quelle nicht in dieser Szene - das ist normal
+                    if (!sceneError.message.includes('nicht in Szene') && !sceneError.message.includes('not found')) {
+                        errors.push(`${scene.sceneName}: ${sceneError.message}`);
+                    }
+                }
             }
+
+            if (foundInScenes.length > 0) {
+                console.log(`📊 Quelle "${sourceName}" gefunden und gesteuert in ${foundInScenes.length} Szene(n): ${foundInScenes.join(', ')}`);
+                return true;
+            } else {
+                console.error(`❌ Quelle "${sourceName}" in keiner Szene gefunden`);
+                console.log('   Verfügbare Quellen:');
+                await this.listSourcesInAllScenes();
+                return false;
+            }
+
+        } catch (error) {
+            console.error(`❌ Fehler beim Durchsuchen aller Szenen:`, error.message);
             return false;
         }
     }
@@ -275,6 +321,33 @@ class SceneSwitcher {
             });
         } catch (error) {
             console.error('   Konnte Quellen nicht abrufen:', error.message);
+        }
+    }
+
+    async listSourcesInAllScenes() {
+        try {
+            const scenes = await this.obs.call('GetSceneList');
+            
+            for (const scene of scenes.scenes) {
+                try {
+                    const sceneItems = await this.obs.call('GetSceneItemList', {
+                        sceneName: scene.sceneName
+                    });
+
+                    console.log(`   Szene "${scene.sceneName}":`);
+                    if (sceneItems.sceneItems.length === 0) {
+                        console.log(`     Keine Quellen`);
+                    } else {
+                        sceneItems.sceneItems.forEach((item, index) => {
+                            console.log(`     ${index + 1}. ${item.sourceName} (${item.sceneItemEnabled ? 'sichtbar' : 'ausgeblendet'})`);
+                        });
+                    }
+                } catch (sceneError) {
+                    console.log(`     Fehler beim Abrufen der Quellen: ${sceneError.message}`);
+                }
+            }
+        } catch (error) {
+            console.error('   Konnte Szenen nicht abrufen:', error.message);
         }
     }
 
